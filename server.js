@@ -4,11 +4,19 @@ import dotenv from 'dotenv';
 import db from './config/database.js';
 import productRoutes from './routes/productRoutes.js';
 import shopifyRoutes from './routes/shopifyRoutes.js'; 
+import webhookRoutes from './routes/webhookRoutes.js'; 
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ===== WEBHOOK RAW BODY MIDDLEWARE (MUST BE FIRST!) =====
+app.use('/api/webhooks', express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf8');  // Save raw body for HMAC
+  }
+}));
 
 // Middleware
 app.use(cors());
@@ -27,14 +35,15 @@ app.get('/', (req, res) => {
     message: 'Shopify Inventory Management API',
     version: '1.0.0',
     endpoints: {
-      health: '/health',
       dbTest: '/db-test',
-      products: '/api/products'
+      products: '/api/products',
+      shopify: '/api/shopify',
+      webhooks: '/api/webhooks'
     }
   });
 });
 
-// Health check route
+// check route
 app.get('/', (req, res) => {
   res.json({ 
     status: 'Server is running', 
@@ -63,6 +72,7 @@ app.get('/db-test', async (req, res) => {
 // Product routes
 app.use('/api/products', productRoutes);
 app.use('/api/shopify', shopifyRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -88,8 +98,9 @@ app.listen(PORT, () => {
   console.log('🚀 Shopify Inventory Backend Started!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log(`📍 Server: http://localhost:${PORT}`);
-  console.log(`💚 Health: http://localhost:${PORT}/health`);
   console.log(`🗄️  DB Test: http://localhost:${PORT}/db-test`);
   console.log(`📦 Products: http://localhost:${PORT}/api/products`);
+  console.log(`🛍️  Shopify: http://localhost:${PORT}/api/shopify`);
+  console.log(`🔔 Webhooks: http://localhost:${PORT}/api/webhooks`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 });
