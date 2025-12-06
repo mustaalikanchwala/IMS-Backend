@@ -186,85 +186,110 @@ class ShopifyService {
     }
   }
 
-  /**
-   * Create product in Shopify with variants
-   * @param {Object} productData - Product data
-   * @returns {Promise<Object>} Created product with IDs
-   */
-  async createProduct(productData) {
-    try {
-      const { name, description, vendor, productType, variants = [] } = productData;
-      
-      // Validate required fields
-      if (!name) {
-        throw new Error('Product name is required');
-      }
-      
-      // Build variants array
-      const shopifyVariants = variants.length > 0 
-        ? variants.map(v => ({
-            title: v.title || 'Default',
-            price: v.price.toString(),
-            sku: v.sku,
-            inventory_management: 'shopify',
-            inventory_quantity: v.stock || 0,
-            option1: v.option1 || null,
-            option2: v.option2 || null,
-            option3: v.option3 || null,
-            weight: v.weight || null,
-            weight_unit: v.weightUnit || 'kg'
-          }))
-        : [{
-            title: 'Default',
-            price: productData.price?.toString() || '0',
-            sku: productData.sku || `SKU-${Date.now()}`,
-            inventory_management: 'shopify',
-            inventory_quantity: productData.stock || 0
-          }];
-      
-      const shopifyProduct = {
-        product: {
-          title: name,
-          body_html: description || '',
-          vendor: vendor || 'Default Vendor',
-          product_type: productType || 'General',
-          variants: shopifyVariants,
-          status: 'active'
-        }
-      };
+  // /**
+  //  * Create product in Shopify with variants
+  //  * @param {Object} productData - Product data
+  //  * @returns {Promise<Object>} Created product with IDs
+  //  */
 
-      console.log(`📤 Creating product in Shopify: ${name}`);
-      
-      const response = await this.retryWithBackoff(async () => {
-        return await this.api.post('/products.json', shopifyProduct);
-      });
-      
-      if (response.status !== 201) {
-        throw new Error(`Failed to create product: ${response.status}`);
+
+  /**
+ * Creates a product in Shopify with proper formatting
+ */
+async createProduct(productData) {
+  try {
+    console.log(`📤 Creating product in Shopify: ${productData.name}`);
+    
+    // Prepare Shopify-compliant product payload
+    const shopifyPayload = {
+      product: {
+        title: productData.name,
+        body_html: productData.description || '',
+        vendor: productData.vendor || 'Default Vendor',
+        product_type: productData.product_type || 'General',
+        status: productData.status || 'active',
+        variants: productData.variants.map(variant => ({
+          sku: variant.sku,
+          price: variant.price.toString(), // ✅ Convert to string
+          compare_at_price: variant.compare_at_price ? variant.compare_at_price.toString() : null,
+          inventory_management: 'shopify',
+          inventory_policy: 'deny', // Don't allow overselling
+          fulfillment_service: 'manual',
+          weight: variant.weight || 0,
+          weight_unit: variant.weight_unit || 'kg',
+          option1: variant.option1 || null,
+          option2: variant.option2 || null,
+          option3: variant.option3 || null
+        })),
+        options: this.buildOptions(productData.variants)
       }
+    };
+    
+    // Log payload for debugging
+    console.log('📋 Shopify Payload:', JSON.stringify(shopifyPayload, null, 2));
+    
+    const response = await this.api.post('/products.json', shopifyPayload);
+    
+    console.log(`✅ Product created in Shopify (ID: ${response.data.product.id})`);
+    
+    return response.data.product;
+    
+  } catch (error) {
+    console.error('❌ Shopify product creation failed');
+    
+    // Enhanced error logging
+    if (error.response) {
+      console.error('   Status:', error.response.status);
+      console.error('   Data:', JSON.stringify(error.response.data, null, 2));
       
-      const createdProduct = response.data.product;
-      
-      console.log(`✅ Product created: ${createdProduct.title}`);
-      console.log(`   Product ID: ${createdProduct.id}`);
-      console.log(`   Variants: ${createdProduct.variants.length}`);
-      
-      return {
-        shopify_product_id: createdProduct.id,
-        variants: createdProduct.variants.map(v => ({
-          shopify_variant_id: v.id,
-          shopify_inventory_item_id: v.inventory_item_id,
-          sku: v.sku,
-          price: v.price,
-          title: v.title
-        }))
-      };
-      
-    } catch (error) {
-      console.error('❌ Error creating product in Shopify');
-      throw new Error(`Failed to create product: ${error.message}`);
+      // Extract specific error messages
+      if (error.response.data.errors) {
+        console.error('   Errors:', error.response.data.errors);
+      }
     }
+    
+    throw new Error(`Failed to create product: ${error.message}`);
   }
+}
+
+/**
+ * Helper: Build Shopify options from variants
+ */
+buildOptions(variants) {
+  const options = [];
+  
+  // Check which options are used
+  const hasOption1 = variants.some(v => v.option1);
+  const hasOption2 = variants.some(v => v.option2);
+  const hasOption3 = variants.some(v => v.option3);
+  
+  if (hasOption1) {
+    const uniqueValues = [...new Set(variants.map(v => v.option1).filter(Boolean))];
+    options.push({
+      name: 'Color', // Or extract from your data
+      values: uniqueValues
+    });
+  }
+  
+  if (hasOption2) {
+    const uniqueValues = [...new Set(variants.map(v => v.option2).filter(Boolean))];
+    options.push({
+      name: 'Size',
+      values: uniqueValues
+    });
+  }
+  
+  if (hasOption3) {
+    const uniqueValues = [...new Set(variants.map(v => v.option3).filter(Boolean))];
+    options.push({
+      name: 'Material',
+      values: uniqueValues
+    });
+  }
+  
+  return options;
+}
+
 
   /**
    * Update product in Shopify
